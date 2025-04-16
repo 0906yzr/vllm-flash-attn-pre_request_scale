@@ -91,6 +91,14 @@ struct Flash_fwd_params : public Qkv_params {
     index_t lseaccum_batch_stride;
     index_t lseaccum_head_stride;
 
+    // req_scales 
+    void * __restrict__ q_req_scales;
+    index_t q_req_scales_col_stride;
+    index_t q_req_scales_row_stride;
+    void * __restrict__ k_req_scales;
+    index_t k_req_scales_col_stride;
+    index_t k_req_scales_row_stride; 
+
     // The K_new and V_new matrices.
     void * __restrict__ knew_ptr;
     void * __restrict__ vnew_ptr;

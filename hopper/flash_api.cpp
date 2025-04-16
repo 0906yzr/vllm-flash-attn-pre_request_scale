@@ -59,6 +59,8 @@ namespace pybind11::detail {
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 void set_params_fprop(Flash_fwd_params &params,
+                    at::Tensor q_req_scales,
+                    at::Tensor k_req_scales,
                       // sizes
                       const size_t b,
                       const size_t seqlen_q,
@@ -84,7 +86,8 @@ void set_params_fprop(Flash_fwd_params &params,
                       int window_size_left,
                       int window_size_right,
                       const float softcap=0.f,
-                      const int sm_margin=0) {
+                      const int sm_margin=0
+                    ) {
 
     // Reset the parameters
     params = {};
@@ -166,7 +169,17 @@ void set_params_fprop(Flash_fwd_params &params,
 
     params.arch = at::cuda::getCurrentDeviceProperties()->major * 10 + at::cuda::getCurrentDeviceProperties()->minor;
     params.num_sm = at::cuda::getCurrentDeviceProperties()->multiProcessorCount - sm_margin;
-
+    params.q_req_scales = q_req_scales.data_ptr();
+    //printf("指针指针！！！！！！！！！%p",params.q_req_scales);
+    params.q_req_scales_row_stride = q_req_scales.stride(-2);
+    params.q_req_scales_col_stride = q_req_scales.stride(-1);
+    params.k_req_scales = k_req_scales.data_ptr();
+    params.k_req_scales_row_stride = k_req_scales.stride(-2);
+    params.k_req_scales_col_stride = k_req_scales.stride(-1);
+    // printf("参数设置成功:q_req_scales_row_stride%ld",params.q_req_scales_row_stride);
+    // printf("参数设置成功:q_req_scales_col_stride%ld",params.q_req_scales_col_stride);
+    // printf("参数设置成功:k_req_scales_row_stride%ld",params.k_req_scales_row_stride);
+    // printf("参数设置成功:k_req_scales_col_stride%ld",params.k_req_scales_col_stride);
     #ifdef FLASHATTENTION_DISABLE_LOCAL
         TORCH_CHECK(!params.is_local, "This flash attention build does not support local attention.");
     #endif
@@ -210,6 +223,7 @@ void set_params_dgrad(Flash_bwd_params &params,
                       int const sm_margin=0) {
 
     set_params_fprop(params,
+                     q,k,
                      b, seqlen_q, seqlen_k, seqlen_q_rounded, seqlen_k_rounded, h, h_k, d, d_rounded,
                      q, k, v, out,
                      cu_seqlens_q_d,
@@ -488,8 +502,9 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
         bool const is_rotary_interleaved,   // if true, rotary combines indices 0 & 1, else indices 0 & rotary_dim / 2
         int num_splits,
         std::optional<bool> pack_gqa_,
-        int const sm_margin
-        ) {
+        int const sm_margin,
+        at::Tensor &q_req_scales,
+        at::Tensor &k_req_scales) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm8x = dprops->major >= 8;
@@ -645,6 +660,8 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
 
     Flash_fwd_params params;
     set_params_fprop(params,
+                    q_req_scales,
+                    k_req_scales,   
                      batch_size,
                      seqlen_q, seqlen_k,
                      seqlen_q_rounded, seqlen_k_rounded,
@@ -661,11 +678,13 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
                      window_size_left,
                      window_size_right,
                      softcap,
-                     sm_margin);
+                     sm_margin
+                    );
     params.total_q = total_q;
     params.total_k = total_k;
     params.sink_token_length = sink_token_length;
     params.b_k = batch_size_k;
+    //printf("22222222222222flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     if (paged_KV) {
         params.page_table = page_table.data_ptr<int>();
@@ -724,6 +743,7 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
             params.cu_seqlens_knew = static_cast<int*>(cu_seqlens_k_new.data_ptr());
         }
     }
+    //printf("33333333333flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     if (leftpad_k_.has_value()) {
         auto leftpad_k = leftpad_k_.value();
@@ -732,6 +752,7 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
         CHECK_SHAPE(leftpad_k, batch_size);
         params.leftpad_k = static_cast<int *>(leftpad_k.data_ptr());
     }
+    //printf("4444444444flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     if (rotary_cos_.has_value()) {
         TORCH_CHECK(k_new_.has_value(), "If rotary cos/sin are provided, new key / value to be appended to KV cache must also be provided");
@@ -758,6 +779,7 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
     } else {
         params.rotary_dim = 0;
     }
+    //printf("5555555555flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     if (kv_batch_idx_.has_value()) {
         auto kv_batch_idx = kv_batch_idx_.value();
@@ -788,6 +810,7 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
         params.lseaccum_split_stride = softmax_lse_accum.stride(0);
         params.lseaccum_head_stride = softmax_lse_accum.stride(-2);
     }
+    // printf("6666666666flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     at::Tensor tile_count_semaphore;
     // We don't use the persistent scheduler if Split and not Varlen
@@ -800,6 +823,7 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
     } else {
         params.tile_count_semaphore = nullptr;
     }
+    //printf("77777777777flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
 
     if (q_type == at::ScalarType::Float8_e4m3fn) {
         if (q_descale_.has_value()) {
@@ -852,9 +876,10 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
     #ifdef FLASHATTENTION_DISABLE_APPENDKV
     TORCH_CHECK(!k_new_.has_value(), "This flash attention build does not support appending KV.");
     #endif
-
+    //printf("8888888flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
     if (total_q > 0 && (total_k + params.total_knew) > 0 && num_heads_k > 0) {
         auto stream = at::cuda::getCurrentCUDAStream().stream();
+        //printf("flash.cppx强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
         run_mha_fwd(params, stream);
         if (params.num_splits > 1) {
             if (out_type == at::ScalarType::BFloat16) {

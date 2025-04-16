@@ -141,6 +141,9 @@ struct CollectiveMainloopFwdSm80 {
     using ShapeQKV = cute::Shape<int32_t, int32_t, int32_t, int32_t>;  // (seqlen, d, head, batch)
     using StrideQK = cute::Stride<int64_t, _1, int64_t, int64_t>;
     using StrideV = StrideQK;
+    using ElementAux_my = const float;
+    using ShapeAux = cute::tuple<int64_t, int64_t>;  // 示例：辅助张量的形状 (seq_len, 1, 2)
+    using StrideAux = cute::tuple<int64_t, int64_t>; // 示例：辅助张量的步幅
     // ((qhead_per_khead, seqlen_q), d, nheads_kv, batch, num_splits)
     using ShapeQPacked = std::conditional_t<!PackGQA, ShapeQKV, cute::Shape<cute::Shape<int32_t, int32_t>, int32_t, int32_t, int32_t>>;
     using StrideQPacked = std::conditional_t<!PackGQA, StrideQK, cute::Stride<cute::Stride<int64_t, int64_t>, _1, int64_t, int64_t>>;
@@ -205,6 +208,12 @@ struct CollectiveMainloopFwdSm80 {
         int const* const seqused_q = nullptr;
         int const* const seqused_k = nullptr;
         int const* const leftpad_k = nullptr;
+        ElementAux_my const* const ptr_q_req_scales;
+        ShapeAux const shape_q_req_scales;
+        StrideAux const stride_q_req_scales;
+        ElementAux_my const* const ptr_k_req_scales;
+        ShapeAux const shape_k_req_scales;
+        StrideAux const stride_k_req_scales;
     };
 
     // Device side kernel params
@@ -248,6 +257,12 @@ struct CollectiveMainloopFwdSm80 {
         int const* const seqused_q = nullptr;
         int const* const seqused_k = nullptr;
         int const* const leftpad_k = nullptr;
+        ElementAux_my const* const ptr_q_req_scales;
+        ShapeAux const shape_q_req_scales;
+        StrideAux const stride_q_req_scales;
+        ElementAux_my const* const ptr_k_req_scales;
+        ShapeAux const shape_k_req_scales;
+        StrideAux const stride_k_req_scales;
     };
 
     static Params
@@ -287,7 +302,11 @@ struct CollectiveMainloopFwdSm80 {
                 !Split ? 1 : args.num_splits,
                 args.kv_batch_idx,
                 args.cu_seqlens_q, args.cu_seqlens_k, args.cu_seqlens_k_new,
-                args.seqused_q, args.seqused_k, args.leftpad_k};
+                args.seqused_q, args.seqused_k, args.leftpad_k,
+                args.ptr_q_req_scales,args.shape_q_req_scales,args.stride_q_req_scales,//my_q_req_scales
+                args.ptr_k_req_scales,args.shape_k_req_scales,args.stride_k_req_scales//my_k_req_scales
+                //tma_load_Aux,
+            };
     }
 
     CUTLASS_DEVICE
