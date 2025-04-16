@@ -116,7 +116,7 @@ void set_params_fprop(Flash_fwd_params &params,
         // Remove potential NaN
         params.softcap = 0.0;
         params.scale_softmax = softmax_scale;
-        params.scale_softmax_log2 = softmax_scale * M_LOG2E;
+        params.scale_softmax_log2 = softmax_scale * M_LOG2E;//处理scale_softmax
     }
 
     // Set this to probability of keeping an element to simplify things.
@@ -346,7 +346,7 @@ void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi
 #endif
 }
 
-std::vector<at::Tensor>
+std::vector<at::Tensor>//这里调用
 mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x round_multiple(head_size, 8)
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x round_multiple(head_size, 8)
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x round_multiple(head_size, 8)

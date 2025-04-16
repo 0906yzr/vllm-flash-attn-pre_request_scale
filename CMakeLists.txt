@@ -4,7 +4,7 @@ project(vllm_flash_attn LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(FA2_ENABLED ON)
+set(FA2_ENABLED OFF)
 set(FA3_ENABLED ON)
 
 # CUDA by default, can be overridden by using -DVLLM_TARGET_DEVICE=... (used by setup.py)
@@ -132,7 +132,7 @@ if (FA2_ENABLED)
 
     # For CUDA we set the architectures on a per file basis
     if (VLLM_GPU_LANG STREQUAL "CUDA")
-        cuda_archs_loose_intersection(FA2_ARCHS "8.0;9.0" "${CUDA_ARCHS}")
+        cuda_archs_loose_intersection(FA2_ARCHS "9.0" "${CUDA_ARCHS}")
         message(STATUS "FA2_ARCHS: ${FA2_ARCHS}")
 
         set_gencode_flags_for_srcs(
@@ -191,7 +191,7 @@ if (FA3_ENABLED AND ${CMAKE_CUDA_COMPILER_VERSION} GREATER_EQUAL 12.0)
 
     # For CUDA we set the architectures on a per file basis
     if (VLLM_GPU_LANG STREQUAL "CUDA")
-        cuda_archs_loose_intersection(FA3_ARCHS "8.0;9.0a" "${CUDA_ARCHS}")
+        cuda_archs_loose_intersection(FA3_ARCHS "9.0a" "${CUDA_ARCHS}")
         message(STATUS "FA3_ARCHS: ${FA3_ARCHS}")
 
         set_gencode_flags_for_srcs(
@@ -203,7 +203,7 @@ if (FA3_ENABLED AND ${CMAKE_CUDA_COMPILER_VERSION} GREATER_EQUAL 12.0)
     endif()
 
     define_gpu_extension_target(
-        _vllm_fa3_C
+        _vllm_fa3_C_my
         DESTINATION vllm_flash_attn
         LANGUAGE ${VLLM_GPU_LANG}
         SOURCES
@@ -216,13 +216,13 @@ if (FA3_ENABLED AND ${CMAKE_CUDA_COMPILER_VERSION} GREATER_EQUAL 12.0)
         USE_SABI 3
         WITH_SOABI)
 
-    target_include_directories(_vllm_fa3_C PRIVATE
+    target_include_directories(_vllm_fa3_C_my PRIVATE
         hopper
         csrc/common
         csrc/cutlass/include)
 
     # custom definitions
-    target_compile_definitions(_vllm_fa3_C PRIVATE
+    target_compile_definitions(_vllm_fa3_C_my PRIVATE
         FLASHATTENTION_DISABLE_BACKWARD
         FLASHATTENTION_DISABLE_DROPOUT
         # FLASHATTENTION_DISABLE_ALIBI

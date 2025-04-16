@@ -59,7 +59,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     // Work-around for gcc 7. It doesn't like nested BOOL_SWITCH.
     // https://github.com/kokkos/kokkos-kernels/issues/349
     // https://github.com/HazyResearch/flash-attention/issues/21
-
+    printf("run_run_flash_fwd");
     const int num_m_block = (params.seqlen_q + Kernel_traits::kBlockM - 1) / Kernel_traits::kBlockM;
     dim3 grid(num_m_block, params.b, params.h);
     const bool is_even_MN = params.cu_seqlens_q == nullptr && params.cu_seqlens_k == nullptr && params.seqlen_k % Kernel_traits::kBlockN == 0 && params.seqlen_q % Kernel_traits::kBlockM == 0;
@@ -225,6 +225,7 @@ void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T, bool Is_causal>
 void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 128;
+    printf("run_flash_fwd_launch_template.h_run_mha_fwd_hdim128");
     auto [cc_major, cc_minor] = get_compute_capability(get_current_device());
     bool is_sm8x = cc_major == 8 && cc_minor > 0;
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
