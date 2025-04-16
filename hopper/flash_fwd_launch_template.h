@@ -46,7 +46,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     static constexpr bool Q_in_regs = Arch >= 90 ? false : std::get<4>(kBlockMN_kNWarps_Stages_RS);
 
     using TileShape_MNK = cute::Shape<Int<kBlockM>, Int<kBlockN>, Int<kHeadDim>>;
-    using TileShape_MNK_PV = cute::Shape<Int<kBlockM>, Int<kHeadDimV>, Int<kBlockN>>;
+    using ElementAux_my = const cutlass::half_t;
     using ClusterShape = cute::Shape<Int<ClusterM>, _1, _1>;
     using CollectiveMainloop = std::conditional_t<
         Arch >= 90,
@@ -125,7 +125,16 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
         params.cu_seqlens_q, params.cu_seqlens_k, params.cu_seqlens_knew,
         params.seqused_q, params.seqused_k,
         params.leftpad_k,
+        reinterpret_cast<const float *>(params.q_req_scales),
+        cute::make_tuple(params.q_req_scales_row_stride, params.q_req_scales_col_stride),
+        cute::make_tuple(params.q_req_scales_row_stride, params.q_req_scales_col_stride),
+        reinterpret_cast<const float *>(params.k_req_scales),
+        cute::make_tuple(params.k_req_scales_row_stride, params.k_req_scales_col_stride),
+        cute::make_tuple(params.k_req_scales_row_stride, params.k_req_scales_col_stride),
     };
+    // printf("强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
+    // printf("mainloop_args%p\n",mainloop_args.ptr_q_req_scales);
+    // printf("步长：%ld,mainloop_args_strid%ld\n",params.q_req_scales_row_stride,cute::get<0>(mainloop_args.stride_q_req_scales));
     typename CollectiveEpilogue::Arguments epilogue_args {
         static_cast<ElementOut*>(!Split ? params.o_ptr : params.oaccum_ptr),
         {seqlen_q, params.dv, params.h, batch_q, params.num_splits},  // shape_O
@@ -165,6 +174,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     // int smem_size_v = sizeof(decltype((typename CollectiveMainloop::TensorStorage{}).smem_v));
     // printf("smem_size = %d, q = %d, k = %d, v = %d\n", smem_size, smem_size_q, smem_size_k, smem_size_v);
     // Get the ptr to kernel function.
+    //printf("runing_here/root/yzr/vllm/_deps/vllm-flash-attn-src/hopper/flash_fwd_launch_template.h");
     if constexpr (size(ClusterShape{}) > 1) {
         void const* kernel = (void const*) cutlass::device_kernel<AttnKernel>;
         if (smem_size >= 48 * 1024) {
@@ -179,6 +189,10 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
             CHECK_CUDA(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
         }
         kernel<<<grid_dims, block_dims, smem_size, stream>>>(kernel_params);
+        if (auto err = cudaGetLastError()) {                                                                                    \
+            printf("kernel err: %d %s", err, cudaGetErrorString(err));                                                          \
+            exit(1);                                                                                                       \
+        }   
     }
     CHECK_CUDA_KERNEL_LAUNCH();
 }
@@ -188,6 +202,12 @@ void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream) {
     static_assert(sizeof(T) == 2 || sizeof(T) == 1, "Only 16bit and 8bit are supported");
     static constexpr bool Is_FP8 = cute::is_same_v<T, cutlass::float_e4m3_t> || cute::is_same_v<T, cutlass::float_e5m2_t>;
     using T_out = std::conditional_t<!Split, std::conditional_t<!Is_FP8, T, cutlass::bfloat16_t>, float>;
+    if(params.q_req_scales==nullptr)
+    {
+        printf("run_mha_fwd(204):强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
+    }
+    // printf("runing_run_mha_fwd__here");
+    // printf("run_mha_fwd:强转前：%p,强制转换后指针：%p\n",params.q_req_scales,reinterpret_cast<const float *>(params.q_req_scales));
     CAUSAL_LOCAL_SWITCH(params.is_causal, params.is_local, Is_causal, Is_local, [&] {
         VCOLMAJOR_SWITCH(params.v_dim_stride != 1, V_colmajor_, [&] {
             static constexpr bool V_colmajor = V_colmajor_ && sizeof(T) == 1;

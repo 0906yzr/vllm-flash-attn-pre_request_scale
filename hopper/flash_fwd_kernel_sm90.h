@@ -12,6 +12,7 @@
 #include <cutlass/numeric_types.h>
 #include <cutlass/numeric_conversion.h>
 #include <cutlass/kernel_hardware_info.h>
+#include "cute/util/debug.hpp"
 #include "cutlass/pipeline/pipeline.hpp"
 
 #include "seqlen.h"
@@ -19,7 +20,7 @@
 #include "softmax.h"
 
 namespace flash {
-
+using ElementAux_my = const float;
 using namespace cute;
 
 template <class CollectiveMainloop_, class CollectiveEpilogue_, class TileScheduler_>
@@ -100,6 +101,7 @@ public:
                 // We want smem_o to line up with the start of smem_v
                 typename CollectiveEpilogue::TensorStorage epilogue;
             };
+            //ElementAux_my smem_aux[128*2];
         } tensors;
         struct PipelineStorage : cute::aligned_struct<16, _1> {
             alignas(16) BarrierQ barrier_Q;
@@ -166,12 +168,12 @@ public:
     static dim3
     get_grid_shape(Params const& params) {
         return TileScheduler::get_grid_shape(params.scheduler, params.hw_info.sm_count);
-    }
+    }//网格维度
 
     static dim3
     get_block_shape() {
         return dim3(MaxThreadsPerBlock, 1, 1);
-    }
+    }//线程块维度
 
     CUTLASS_DEVICE
     void
@@ -301,9 +303,6 @@ public:
         } else {
             __syncthreads();
         }
-
-        TileScheduler scheduler(reinterpret_cast<typename TileScheduler::SharedStorage*>(&shared_storage.pipelines.smem_scheduler));
-
         if (warp_group_idx == 0) {  // Producer
             cutlass::arch::warpgroup_reg_dealloc<LoadRegisterRequirement>();
 
@@ -378,6 +377,29 @@ public:
                 // If there's tanh softcap, the scaling will be done before tanh.
                 auto block_coord = work_tile_info.get_block_coord(params.scheduler);
                 int const bidb = get<2>(block_coord);
+                /*寄存器实现*/
+                // int const bidm = get<0>(block_coord);
+                // int const thread_idx = threadIdx.x;
+                // int const mma_thread_offset = thread_idx - MmaThreadOffset;
+                // int const row_idx_in_tile = mma_thread_offset / (kBlockM / NumMmaThreads);
+                // int const global_row_idx = bidm * kBlockM + row_idx_in_tile;
+                //printf("Running_my_kernel");
+                ElementAux_my q_aux_data_dir = params.mainloop.ptr_q_req_scales[int(bidb * get<0>(params.mainloop.stride_q_req_scales))];
+                ElementAux_my k_aux_data_dir = params.mainloop.ptr_k_req_scales[int(bidb * get<0>(params.mainloop.stride_k_req_scales))];
+                //printf("q_aux_data_dir:%f,k_aux_data_dir%f:\n",q_aux_data_dir,k_aux_data_dir);
+                softmax_scale_log2 *=q_aux_data_dir*k_aux_data_dir;
+                //printf("block_coord:%d,%d,%d\n",get<0>(block_coord),get<1>(block_coord),get<2>(block_coord));
+                //printf("pointer_ptr_q_req_scales%p\n",params.mainloop.ptr_q_req_scales);
+                // 加载辅助张量到寄存器
+                // ElementAux_my q_aux_data = params.mainloop.ptr_q_req_scales[0];
+                // ElementAux_my k_aux_data = params.mainloop.ptr_k_req_scales[0];
+                // printf("加载k_scales:\n%f",float((static_cast<const float*>(params.mainloop.ptr_k_req_scales))[0]));
+                //ElementAux_my q_aux_data_dir = *(params.mainloop.ptr_q_req_scales+bidb * get<0>(params.mainloop.stride_q_req_scales));
+                //ElementAux_my q_aux_data_dir = params.mainloop.ptr_k_req_scales[bidb * get<0>(params.mainloop.stride_k_req_scales)];
+                //printf("q_aux_data_dir:%f\n",q_aux_data_dir); 
+                //printf("1:%f ,2:%f ,3:%f ,4:%f\n",params.mainloop.ptr_q_req_scales[0],params.mainloop.ptr_q_req_scales[1],params.mainloop.ptr_q_req_scales[2],params.mainloop.ptr_q_req_scales[3]);
+                //printf("block_coord:%d,%d,%d,q_aux_data_dir:%f,get<0>(params.mainloop.stride_q_req_scales)%d,bidb:%d,idx=%d:",get<0>(block_coord),get<1>(block_coord),get<2>(block_coord), params.mainloop.ptr_k_req_scales[int(get<2>(block_coord) * get<0>(params.mainloop.stride_k_req_scales))],int(get<0>(params.mainloop.stride_q_req_scales)),get<2>(block_coord),int(get<2>(block_coord) * get<0>(params.mainloop.stride_k_req_scales)));    
+                //printf("block_coord:%d,%d,%d,q_aux_data_dir:%f,get<0>(params.mainloop.stride_q_req_scales)%d,bidb:%d,idx=%d:",get<0>(block_coord),get<1>(block_coord),get<2>(block_coord), params.mainloop.ptr_k_req_scales[int(get<2>(block_coord) * get<0>(params.mainloop.stride_k_req_scales))],int(get<0>(params.mainloop.stride_q_req_scales)),get<2>(block_coord),int(get<2>(block_coord) * get<0>(params.mainloop.stride_k_req_scales)));    
                 if constexpr (Is_FP8 && !Has_softcap) {
                     int const bidh = get<1>(block_coord);
                     int const bidh_kv = !PackGQA ? params.mainloop.qhead_per_khead_divmod.divide(bidh) : bidh;

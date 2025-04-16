@@ -41,8 +41,10 @@ mha_fwd(at::Tensor &q,   // (b, s_q, h, d) or (total_q, h, d) if there is cu_seq
         float const softcap,
         bool const is_rotary_interleaved,   // if true, rotary combines indices 0 & 1, else indices 0 & rotary_dim / 2
         int num_splits,
-        std::optional<bool> pack_gqa_,
-        int const sm_margin);
+        c10::optional<bool> pack_gqa_,
+        int const sm_margin,
+        at::Tensor &q_req_scales,
+        at::Tensor &k_req_scales);
 
 /**
  *  Torch Library Registration
@@ -79,7 +81,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
             "    bool     is_rotary_interleaved,"
             "    int      num_splits,"
             "    bool?    pack_gqa,"
-            "    int      sm_margin) -> Tensor[]");
+            "    int      sm_margin,"
+            "    Tensor   q_req_scales,"
+            "    Tensor   k_req_scales) -> Tensor[]");
     ops.impl("fwd", torch::kCUDA, make_pytorch_shim(&mha_fwd));
 }
 

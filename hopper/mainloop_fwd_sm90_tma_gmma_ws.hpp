@@ -231,6 +231,11 @@ struct CollectiveMainloopFwdSm90 {
     using ShapeQKV = cute::Shape<int32_t, int32_t, int32_t, int32_t>;  // (seqlen, d, head, batch)
     using StrideQK = cute::Stride<int64_t, _1, int64_t, int64_t>;
     using StrideV = std::conditional_t<!V_colmajor, StrideQK, cute::Stride<_1, int64_t, int64_t, int64_t>>;
+    /* 自己实现*/
+    using ElementAux_my = const float;
+    using ShapeAux = cute::tuple<int64_t, int64_t>;  // 示例：辅助张量的形状 (seq_len, 1, 2)
+    using StrideAux = cute::tuple<int64_t, int64_t>; // 示例：辅助张量的步幅
+    /* */
     // ((qhead_per_khead, seqlen_q), d, nheads_kv, batch, num_splits)
     using ShapeQPacked = std::conditional_t<!PackGQA, ShapeQKV, cute::Shape<cute::Shape<int32_t, int32_t>, int32_t, int32_t, int32_t>>;
     using StrideQPacked = std::conditional_t<!PackGQA, StrideQK, cute::Stride<cute::Stride<int64_t, int64_t>, _1, int64_t, int64_t>>;
@@ -239,6 +244,13 @@ struct CollectiveMainloopFwdSm90 {
     using ShapeRotary = cute::Shape<int32_t, int32_t>;  // (seqlen_ro, rotary_dim // 2)
     using StrideRotary = cute::Stride<int64_t, _1>;
     using StrideDescale = cute::Stride<int64_t, int64_t>;
+
+    // using TMA_Aux = decltype(make_tma_copy_A_sm90(
+    //     GmemTiledCopyQ{},
+    //     make_tensor(make_gmem_ptr(static_cast<Element const*>(nullptr)), ShapeQKV{}, StrideQK{}),
+    //     SmemLayoutQ{},
+    //     TileShape_MNK{},
+    //     ClusterShape{}));
 
     using TMA_Q = decltype(make_tma_copy_A_sm90(
         GmemTiledCopyQ{},
@@ -390,6 +402,12 @@ struct CollectiveMainloopFwdSm90 {
         int const* const seqused_q = nullptr;
         int const* const seqused_k = nullptr;
         int const* const leftpad_k = nullptr;
+        ElementAux_my const* const ptr_q_req_scales;
+        ShapeAux const shape_q_req_scales;
+        StrideAux const stride_q_req_scales;
+        ElementAux_my const* const ptr_k_req_scales;
+        ShapeAux const shape_k_req_scales;
+        StrideAux const stride_k_req_scales;
     };
 
     // Device side kernel params
@@ -444,10 +462,25 @@ struct CollectiveMainloopFwdSm90 {
         int const* const seqused_q = nullptr;
         int const* const seqused_k = nullptr;
         int const* const leftpad_k = nullptr;
+        const float * ptr_q_req_scales;
+        ShapeAux const shape_q_req_scales;
+        StrideAux const stride_q_req_scales;
+        const float * ptr_k_req_scales;
+        ShapeAux const shape_k_req_scales;
+        StrideAux const stride_k_req_scales;
+        /*TMA_Aux tma_load_Aux;*/
     };
 
     static Params
     to_underlying_arguments(Arguments const& args) {
+        // Tensor mAux = make_tensor(make_gmem_ptr(args.ptr_q_req_scales), args.shape_q_req_scales, args.stride_q_req_scales);
+        // TMA_Aux tma_load_Aux = make_tma_copy_A_sm90(
+        //     GmemTiledCopyQ{},
+        //     mAux,
+        //     SmemLayoutQ{},
+        //     TileShape_MNK{},
+        //     ClusterShape{}); // no mcast for Q
+
         Tensor mQ = make_tensor(make_gmem_ptr(args.ptr_Q), args.shape_Q, args.stride_Q);
         TMA_Q tma_load_Q = make_tma_copy_A_sm90(
             GmemTiledCopyQ{},
@@ -528,6 +561,12 @@ struct CollectiveMainloopFwdSm90 {
         // To reduce the number of instructions, we instead pre-multiply softmax_scale / softcap_val
         // (assigning it to params.softcap_val) and pre-multiply softcap_val * log2(e)
         // (assigning it to params.softmax_scale_log2).
+        if(args.ptr_q_req_scales==nullptr)
+        {
+            print("mainloop_fwd_sm90(466)%p\n",args.ptr_q_req_scales);
+        }
+        // printf("mainloop指针指针！！！！%p\n",args.ptr_q_req_scales);
+        // printf("mainloop!!!!!%ld\n",cute::get<0>(args.shape_q_req_scales));
         return {args.ptr_Q, args.shape_Q, args.stride_Q, shape_Q_packed, stride_Q_packed,
                 args.ptr_K, args.shape_K, args.stride_K, args.ptr_V, args.headdim_v, args.stride_V,
                 args.ptr_K_new, args.shape_K_new, args.stride_K_new, args.ptr_V_new, args.stride_V_new,
@@ -546,7 +585,11 @@ struct CollectiveMainloopFwdSm90 {
                 !Split ? 1 : args.num_splits,
                 args.kv_batch_idx,
                 args.cu_seqlens_q, args.cu_seqlens_k, args.cu_seqlens_k_new,
-                args.seqused_q, args.seqused_k, args.leftpad_k};
+                args.seqused_q, args.seqused_k, args.leftpad_k,
+                args.ptr_q_req_scales,args.shape_q_req_scales,args.stride_q_req_scales,//my_q_req_scales
+                args.ptr_k_req_scales,args.shape_k_req_scales,args.stride_k_req_scales,//my_k_req_scales
+                //tma_load_Aux,
+            };
     }
 
     /// Issue Tma Descriptor Prefetch -- ideally from a single thread for best performance

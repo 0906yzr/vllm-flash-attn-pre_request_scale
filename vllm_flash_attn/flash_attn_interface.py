@@ -18,7 +18,7 @@ except ImportError as e:
     FA2_AVAILABLE = False
 
 try:
-    from . import _vllm_fa3_C  # noqa: F401
+    from . import _vllm_fa3_C_my  # noqa: F401
     FA3_UNAVAILABLE_REASON = None
     FA3_AVAILABLE = True
 except ImportError as e:
@@ -193,7 +193,7 @@ def flash_attn_varlen_func(
             None,
         )
     elif fa_version == 3:
-        out, softmax_lse, _, _ = torch.ops._vllm_fa3_C.fwd(
+        out, softmax_lse, _, _ = torch.ops._vllm_fa3_C_my.fwd(
             q, k, v,
             None, None,       # k_new, v_new
             q_v,              #
@@ -246,6 +246,8 @@ def flash_attn_with_kvcache(
     *,
     out=None,
     fa_version: int = DEFAULT_FA_VERSION,
+    q_req_scales=None,
+    k_req_scales=None,
 ):
     """
     If k and v are not None, k_cache and v_cache will be updated *inplace* with the new values from
@@ -367,7 +369,7 @@ def flash_attn_with_kvcache(
             num_splits,
         )
     elif fa_version == 3:
-        out, softmax_lse, _, _ = torch.ops._vllm_fa3_C.fwd(
+        out, softmax_lse, _, _ = torch.ops._vllm_fa3_C_my.fwd(
             q, k_cache, v_cache, # q, k, v
             k, v,             # k_new, v_new
             None,             # q_v
@@ -390,6 +392,8 @@ def flash_attn_with_kvcache(
             num_splits,       # num_splits
             None,             # pack_gqa
             0,                # sm_margin
+            q_req_scales,
+            k_req_scales,
         )
     else:
         raise ValueError(f"Unsupported FA version: {fa_version}")
