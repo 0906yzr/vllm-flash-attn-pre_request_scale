@@ -34,7 +34,7 @@ def _is_fa2_supported(device = None) -> Tuple[bool, Optional[str]]:
         return False, f"FA2 is unavaible due to: {FA2_UNAVAILABLE_REASON}"
     if torch.cuda.get_device_capability(device)[0] < 8:
         return False, \
-            "FA2 is only supported on devices with compute capability < 8"
+            "FA2 is only supported on devices with compute capability >= 8"
     return True, None
     
 def _is_fa3_supported(device = None) -> Tuple[bool, Optional[str]]:
@@ -59,7 +59,7 @@ def fa_version_unsupported_reason(fa_version: int, device = None) \
     -> Optional[str]:
     assert fa_version in [2, 3], f"Unsupported FA version: {fa_version}"
     if fa_version == 2:
-        return _is_fa3_supported(device)[1]
+        return _is_fa2_supported(device)[1]
     elif fa_version == 3:
         return _is_fa3_supported(device)[1]
 
@@ -82,6 +82,7 @@ def flash_attn_varlen_func(
     max_seqlen_k,
     cu_seqlens_k=None, # only used for non-paged prefill
     seqused_k=None,
+    q_v=None,
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
@@ -91,7 +92,6 @@ def flash_attn_varlen_func(
     deterministic=False,
     return_attn_probs=False,
     block_table=None,
-    *,
     return_softmax_lse=False,
     out=None,
     fa_version: int = DEFAULT_FA_VERSION,
@@ -196,6 +196,7 @@ def flash_attn_varlen_func(
         out, softmax_lse, _, _ = torch.ops._vllm_fa3_C_my.fwd(
             q, k, v,
             None, None,       # k_new, v_new
+            q_v,              #
             out,
             cu_seqlens_q,
             cu_seqlens_k,     # cu_seqlens_k
@@ -371,6 +372,7 @@ def flash_attn_with_kvcache(
         out, softmax_lse, _, _ = torch.ops._vllm_fa3_C_my.fwd(
             q, k_cache, v_cache, # q, k, v
             k, v,             # k_new, v_new
+            None,             # q_v
             out,
             None, None,       # cu_seqlens_q, cu_seqlens_k
             None,             # cu_seqlens_k_new
